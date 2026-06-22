@@ -29,7 +29,6 @@ type ServerMessage = DrawMessage | SnapshotMessage;
 
 export default function App() {
   const wsRef = useRef<WebSocket | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [color, setColor] = useState("#ff0000");
   const [, setConnected] = useState(false);
@@ -73,6 +72,9 @@ export default function App() {
   }, []);
   
 
+  // 描画用関数
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
   function clearCanvas() {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -109,22 +111,39 @@ export default function App() {
     );
   }
 
-  function handleCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
+
+  // カーソル操作からメッセージ送信する関数
+  const isDrawingRef = useRef(false);
+  const lastCellRef = useRef<{ x: number; y: number } | null>(null);
+
+  function drawAtPointer(e: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
     const ws = wsRef.current;
 
-    if (!canvas || !ws) return;
-    if (ws.readyState !== WebSocket.OPEN) return;
+    if (!canvas) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     const rect = canvas.getBoundingClientRect();
 
+    // セルの座標を計算
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
+
+    if (px < 0 || px >= rect.width || py < 0 || py >= rect.height) {
+      return;
+    }
 
     const cellSize = CANVAS_PX / GRID_SIZE;
 
     const x = Math.floor(px / cellSize);
     const y = Math.floor(py / cellSize);
+
+    const lastCell = lastCellRef.current;
+
+    // 同じセルならメッセージは送らない
+    if (lastCell && lastCell.x === x && lastCell.y === y) {
+      return;
+    }
 
     const msg: DrawMessage = {
       type: "draw",
@@ -134,6 +153,28 @@ export default function App() {
     };
 
     ws.send(JSON.stringify(msg));
+
+    lastCellRef.current = { x, y };
+  }
+
+  function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    isDrawingRef.current = true;
+    lastCellRef.current = null;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drawAtPointer(e);
+  }
+
+  function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!isDrawingRef.current) return;
+    drawAtPointer(e);
+  }
+
+  function handlePointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
+    isDrawingRef.current = false;
+    lastCellRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
   }
 
   return (
@@ -151,7 +192,10 @@ export default function App() {
           ref={canvasRef}
           width={CANVAS_PX}
           height={CANVAS_PX}
-          onClick={handleCanvasClick}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
           style={{
             border: "1px solid black",
             imageRendering: "pixelated",
