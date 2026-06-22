@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
-const GRID_SIZE = 32;
+const GRID_SIZE = 128;
 const CANVAS_PX = 512;
+
+type Point = {
+  x: number;
+  y: number;
+};
 
 type Cell = {
   x: number;
@@ -114,7 +119,45 @@ export default function App() {
 
   // カーソル操作からメッセージ送信する関数
   const isDrawingRef = useRef(false);
-  const lastCellRef = useRef<{ x: number; y: number } | null>(null);
+  const lastCellRef = useRef<Point| null>(null);
+
+  function linePoints(from: Point, to: Point): Point[] {
+    const points: Point[] = [];
+
+    let x0 = from.x;
+    let y0 = from.y;
+    const x1 = to.x;
+    const y1 = to.y;
+
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+
+    let err = dx - dy;
+
+    while (true) {
+      points.push({ x: x0, y: y0 });
+
+      if (x0 === x1 && y0 === y1) {
+        break;
+      }
+
+      const e2 = 2 * err;
+
+      if (e2 > -dy) {
+        err -= dy;
+        x0 += sx;
+      }
+
+      if (e2 < dx) {
+        err += dx;
+        y0 += sy;
+      }
+    }
+
+    return points;
+  }
 
   function drawAtPointer(e: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
@@ -135,26 +178,32 @@ export default function App() {
 
     const cellSize = CANVAS_PX / GRID_SIZE;
 
-    const x = Math.floor(px / cellSize);
-    const y = Math.floor(py / cellSize);
-
-    const lastCell = lastCellRef.current;
+    const currentCell: Point = {
+      x: Math.floor(px / cellSize),
+      y: Math.floor(py / cellSize)
+    };
 
     // 同じセルならメッセージは送らない
-    if (lastCell && lastCell.x === x && lastCell.y === y) {
+    const lastCell = lastCellRef.current;
+    if (lastCell && lastCell.x === currentCell.x && lastCell.y === currentCell.y) {
       return;
     }
 
-    const msg: DrawMessage = {
-      type: "draw",
-      x,
-      y,
-      color,
-    };
+    const points =
+      lastCell === null ?
+        [currentCell] : linePoints(lastCell, currentCell);
 
-    ws.send(JSON.stringify(msg));
+    for (const point of points) {
+      const msg: DrawMessage = {
+        type: "draw",
+        x: point.x,
+        y: point.y,
+        color,
+      };
 
-    lastCellRef.current = { x, y };
+      ws.send(JSON.stringify(msg));
+    }
+    lastCellRef.current = currentCell;
   }
 
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {

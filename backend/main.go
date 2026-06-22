@@ -11,11 +11,10 @@ import (
 
 
 
-const GridSize = 32
+const GridSize = 128
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// 開発中は許可。本番では Origin を制限する。
 		return true
 	},
 }
