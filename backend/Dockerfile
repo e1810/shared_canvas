@@ -15,6 +15,4 @@ WORKDIR /app
 
 COPY --from=build /bin/backend /usr/local/bin/backend
 
-EXPOSE 8080
-
 CMD ["backend"]
