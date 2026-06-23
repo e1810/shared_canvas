@@ -1,0 +1,57 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+# 二重で実行しない 新しい方優先
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
+# OIDC token 発行用
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::807598718091:role/github-actions-shared-canvas-deploy
+          aws-region: ap-northeast-3
+
+      - name: Deploy via SSM
+        id: deploy # command_id 保存用
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --region ap-northeast-3 \
+            --instance-ids "i-0f7e3e28f0a240069" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["/opt/deploy/shared_canvas.sh"]' \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT" # command_id の設定を書き込み
+
+      - name: Wait for deploy
+        run: |
+          aws ssm wait command-executed \
+            --region ap-northeast-3 \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "i-0f7e3e28f0a240069"
+
+      - name: Show deploy result
+        if: always() # 前stepの成否にかかわらず実行
+        run: |
+          aws ssm get-command-invocation \
+            --region ap-northeast-3 \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "i-0f7e3e28f0a240069" \
+            --query '{Status:Status, stdout:StandardOutputContent, stderr:StandardErrorContent}'
