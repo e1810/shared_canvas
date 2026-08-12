@@ -1,0 +1,16 @@
+**/node_modules/
+**/__pycache__/
+*.py[cod]
+.DS_Store
+frontend/dist/
+worker/.venv/
+worker/.venv-workers/
+worker/.pytest_cache/
+worker/.ruff_cache/
+worker/python_modules/
+worker/.wrangler/
+worker/.wrangler-dist/
+.dev.vars
+.env
+.env.*
+!.env.example

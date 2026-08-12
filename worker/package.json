@@ -1,0 +1,20 @@
+{
+  "name": "canvas-worker",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "build": "npm run frontend:build && uv run pywrangler deploy --dry-run --outdir .wrangler-dist",
+    "check": "uv run ruff check src tests && uv run python -m unittest discover -s tests && npm run frontend:lint && npm run build",
+    "deploy": "npm run frontend:build && uv run pywrangler deploy",
+    "dev": "npm run frontend:build && uv run pywrangler dev",
+    "frontend:build": "npm --prefix ../frontend run build",
+    "frontend:lint": "npm --prefix ../frontend run lint",
+    "test": "uv run python -m unittest discover -s tests"
+  },
+  "devDependencies": {
+    "wrangler": "^4.121.0"
+  }
+}

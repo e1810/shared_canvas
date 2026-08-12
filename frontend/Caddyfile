@@ -1,6 +1,0 @@
-:80 {
-	reverse_proxy /ws backend:8080
-
-	root * /usr/share/caddy
-	file_server
-}

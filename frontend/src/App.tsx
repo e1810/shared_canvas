@@ -34,11 +34,44 @@ type ServerMessage = DrawMessage | SnapshotMessage;
 
 export default function App() {
   const wsRef = useRef<WebSocket | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [color, setColor] = useState("#ff0000");
   const [, setConnected] = useState(false);
 
   useEffect(() => {
+    function drawCell(x: number, y: number, color: string) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const cellSize = CANVAS_PX / GRID_SIZE;
+
+      ctx.fillStyle = color;
+      ctx.fillRect(
+        x * cellSize,
+        y * cellSize,
+        cellSize,
+        cellSize
+      );
+    }
+
+    function drawSnapshot(cells: Cell[]) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (const cell of cells) {
+        drawCell(cell.x, cell.y, cell.color);
+      }
+    }
+
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
     wsRef.current = ws;
@@ -75,47 +108,6 @@ export default function App() {
       ws.close();
     };
   }, []);
-  
-
-  // 描画用関数
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  function clearCanvas() {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }
-
-  function drawSnapshot(cells: Cell[]) {
-    clearCanvas();
-
-    for (const cell of cells) {
-      drawCell(cell.x, cell.y, cell.color);
-    }
-  }
-
-  function drawCell(x: number, y: number, color: string) {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const cellSize = CANVAS_PX / GRID_SIZE;
-
-    ctx.fillStyle = color;
-    ctx.fillRect(
-      x * cellSize,
-      y * cellSize,
-      cellSize,
-      cellSize
-    );
-  }
-
 
   // カーソル操作からメッセージ送信する関数
   const isDrawingRef = useRef(false);
