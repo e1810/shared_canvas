@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="共有キャンバスをCloudflare WorkersとDurable Objectsへ移行した構成・実装・運用の解説レポート" />
+  <title>共有キャンバス Cloudflare Workers導入レポート</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #647087;
+      --line: #dce2ec;
+      --paper: #ffffff;
+      --wash: #f5f7fb;
+      --navy: #172b4d;
+      --blue: #1f6feb;
+      --cyan: #0f8fa8;
+      --orange: #f48120;
+      --orange-soft: #fff4e8;
+      --green: #16835c;
+      --green-soft: #eaf8f2;
+      --yellow-soft: #fff8d8;
+      --red: #b42318;
+      --shadow: 0 18px 55px rgba(23, 32, 51, 0.10);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--wash);
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 90% 0%, rgba(244, 129, 32, 0.14), transparent 28rem),
+        radial-gradient(circle at 5% 16%, rgba(31, 111, 235, 0.10), transparent 30rem),
+        var(--wash);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+        "Yu Gothic UI", "Yu Gothic", Meiryo, sans-serif;
+      line-height: 1.75;
+    }
+
+    a { color: var(--blue); }
+    a:hover { text-decoration-thickness: 2px; }
+    code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+    code {
+      padding: 0.12em 0.38em;
+      color: #9b3f00;
+      background: var(--orange-soft);
+      border-radius: 5px;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 1rem 0;
+      padding: 1.15rem 1.25rem;
+      overflow-x: auto;
+      color: #e9efff;
+      background: #101a2d;
+      border: 1px solid #283752;
+      border-radius: 13px;
+      line-height: 1.55;
+      font-size: 0.88rem;
+      box-shadow: inset 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+    }
+
+    .hero {
+      color: white;
+      background:
+        linear-gradient(120deg, rgba(23, 43, 77, 0.96), rgba(24, 66, 116, 0.94)),
+        #172b4d;
+      border-bottom: 5px solid var(--orange);
+    }
+
+    .hero-inner,
+    .layout,
+    .footer-inner {
+      width: min(1180px, calc(100% - 2rem));
+      margin: 0 auto;
+    }
+
+    .hero-inner { padding: 4.6rem 0 4rem; }
+
+    .eyebrow {
+      margin: 0 0 0.7rem;
+      color: #ffd7ad;
+      font-weight: 750;
+      font-size: 0.82rem;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 900px;
+      margin: 0;
+      font-size: clamp(2.05rem, 5vw, 4rem);
+      line-height: 1.17;
+      letter-spacing: -0.035em;
+    }
+
+    .hero-lead {
+      max-width: 820px;
+      margin: 1.4rem 0 0;
+      color: #dbe8fb;
+      font-size: clamp(1rem, 2vw, 1.22rem);
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin-top: 1.75rem;
+    }
+
+    .chip {
+      padding: 0.38rem 0.75rem;
+      color: #eff6ff;
+      background: rgba(255, 255, 255, 0.10);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 999px;
+      font-size: 0.84rem;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 235px minmax(0, 1fr);
+      gap: 2rem;
+      padding: 2.4rem 0 5rem;
+    }
+
+    .toc {
+      position: sticky;
+      top: 1rem;
+      align-self: start;
+      padding: 1.2rem;
+      background: rgba(255, 255, 255, 0.88);
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      box-shadow: 0 8px 25px rgba(23, 32, 51, 0.06);
+      backdrop-filter: blur(8px);
+    }
+
+    .toc strong {
+      display: block;
+      margin-bottom: 0.5rem;
+      color: var(--navy);
+      font-size: 0.82rem;
+      letter-spacing: 0.08em;
+    }
+
+    .toc ol {
+      margin: 0;
+      padding-left: 1.3rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .toc a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .toc a:hover { color: var(--blue); }
+    main { min-width: 0; }
+
+    section {
+      margin-bottom: 1.7rem;
+      padding: clamp(1.35rem, 3vw, 2.2rem);
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    h2 {
+      margin: 0 0 1.25rem;
+      color: var(--navy);
+      font-size: clamp(1.42rem, 3vw, 2rem);
+      line-height: 1.35;
+      letter-spacing: -0.018em;
+    }
+
+    h2 .num {
+      display: inline-grid;
+      place-items: center;
+      width: 2rem;
+      height: 2rem;
+      margin-right: 0.5rem;
+      color: white;
+      background: var(--orange);
+      border-radius: 8px;
+      font-size: 0.92rem;
+      vertical-align: 0.18rem;
+    }
+
+    h3 {
+      margin: 1.7rem 0 0.65rem;
+      color: var(--navy);
+      font-size: 1.12rem;
+    }
+
+    p { margin: 0.7rem 0; }
+    ul, ol { padding-left: 1.4rem; }
+    li + li { margin-top: 0.28rem; }
+
+    .summary-grid,
+    .concept-grid,
+    .ops-grid,
+    .file-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.9rem;
+    }
+
+    .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .metric,
+    .concept,
+    .file-card {
+      padding: 1rem;
+      background: #f9fbff;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 0.2rem;
+      color: var(--green);
+      font-size: 1.05rem;
+    }
+
+    .metric span,
+    .concept p,
+    .file-card p {
+      color: var(--muted);
+      font-size: 0.91rem;
+    }
+
+    .concept .icon {
+      display: inline-grid;
+      place-items: center;
+      width: 2.1rem;
+      height: 2.1rem;
+      margin-bottom: 0.55rem;
+      color: white;
+      background: var(--navy);
+      border-radius: 9px;
+      font-weight: 800;
+    }
+
+    .concept h3,
+    .file-card h3 { margin: 0; }
+    .concept p,
+    .file-card p { margin-bottom: 0; }
+
+    .callout {
+      margin: 1.1rem 0;
+      padding: 1rem 1.1rem;
+      background: var(--yellow-soft);
+      border-left: 5px solid #d49a00;
+      border-radius: 9px;
+    }
+
+    .callout.good {
+      background: var(--green-soft);
+      border-left-color: var(--green);
+    }
+
+    .callout.risk {
+      background: #fff1f0;
+      border-left-color: var(--red);
+    }
+
+    .callout strong { color: var(--navy); }
+
+    .diagram {
+      margin: 1.2rem 0;
+      padding: 0.65rem;
+      overflow-x: auto;
+      background: #f7f9fd;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+    }
+
+    .diagram svg {
+      display: block;
+      width: 100%;
+      min-width: 760px;
+      height: auto;
+    }
+
+    .caption {
+      margin: -0.3rem 0 1rem;
+      color: var(--muted);
+      text-align: center;
+      font-size: 0.82rem;
+    }
+
+    .table-wrap {
+      margin: 1rem 0;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.91rem;
+    }
+
+    th, td {
+      padding: 0.82rem 0.9rem;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--navy);
+      background: #eef3fb;
+      font-weight: 750;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0.55rem;
+      margin: 1rem 0;
+      counter-reset: flow;
+    }
+
+    .flow > div {
+      position: relative;
+      min-height: 116px;
+      padding: 0.85rem 0.75rem;
+      background: #f8faff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      counter-increment: flow;
+    }
+
+    .flow > div::before {
+      content: counter(flow);
+      display: grid;
+      place-items: center;
+      width: 1.6rem;
+      height: 1.6rem;
+      margin-bottom: 0.5rem;
+      color: white;
+      background: var(--blue);
+      border-radius: 50%;
+      font-size: 0.8rem;
+      font-weight: 800;
+    }
+
+    .flow strong { display: block; color: var(--navy); }
+    .flow small { display: block; margin-top: 0.3rem; color: var(--muted); }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.58rem;
+      color: #0d6547;
+      background: var(--green-soft);
+      border: 1px solid #adddcc;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 750;
+    }
+
+    .status::before {
+      content: "";
+      width: 0.48rem;
+      height: 0.48rem;
+      background: var(--green);
+      border-radius: 50%;
+    }
+
+    .tag {
+      display: inline-block;
+      margin: 0.1rem 0.2rem 0.1rem 0;
+      padding: 0.16rem 0.45rem;
+      color: #33415c;
+      background: #edf1f8;
+      border-radius: 5px;
+      font-size: 0.78rem;
+    }
+
+    .command {
+      margin: 0.8rem 0;
+      padding: 0.85rem 1rem;
+      color: #e9efff;
+      background: #101a2d;
+      border-radius: 11px;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.88rem;
+      overflow-x: auto;
+    }
+
+    details {
+      margin: 0.8rem 0;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+    }
+
+    summary {
+      padding: 0.8rem 1rem;
+      color: var(--navy);
+      background: #f8faff;
+      cursor: pointer;
+      font-weight: 700;
+      border-radius: 11px;
+    }
+
+    details > div { padding: 0 1rem 1rem; }
+
+    .sources li { margin-bottom: 0.55rem; }
+
+    footer {
+      padding: 2.5rem 0 3.5rem;
+      color: #d9e4f5;
+      background: var(--navy);
+      border-top: 5px solid var(--orange);
+    }
+
+    footer p { margin: 0.2rem 0; }
+    footer small { color: #aebdd3; }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .toc { position: static; }
+      .summary-grid { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 640px) {
+      .hero-inner { padding: 3.2rem 0 3rem; }
+      .concept-grid, .ops-grid, .file-grid, .flow { grid-template-columns: 1fr; }
+      section { border-radius: 13px; }
+    }
+
+    @media print {
+      html, body { background: white; }
+      .hero { background: var(--navy) !important; print-color-adjust: exact; }
+      .layout { display: block; width: 100%; padding-top: 1rem; }
+      .toc { display: none; }
+      section { break-inside: avoid; box-shadow: none; }
+      a { color: inherit; text-decoration: none; }
+      .diagram { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">Technical onboarding report</p>
+      <h1>共有キャンバス<br />Cloudflare Workers導入レポート</h1>
+      <p class="hero-lead">
+        Cloudflareの基礎概念から、このリポジトリで実際に記述した設定、
+        WebSocketとデータ保存の流れ、デプロイ・運用方法までを一冊にまとめた入門資料です。
+      </p>
+      <div class="chips" aria-label="利用技術">
+        <span class="chip">Cloudflare Workers</span>
+        <span class="chip">Durable Objects</span>
+        <span class="chip">WebSocket Hibernation</span>
+        <span class="chip">Workers Static Assets</span>
+        <span class="chip">Python Workers (beta)</span>
+        <span class="chip">Pyodide</span>
+        <span class="chip">Wrangler</span>
+        <span class="chip">React + Vite</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="目次">
+      <strong>CONTENTS</strong>
+      <ol>
+        <li><a href="#summary">要約</a></li>
+        <li><a href="#cloudflare">Cloudflareの基礎</a></li>
+        <li><a href="#architecture">全体構成</a></li>
+        <li><a href="#request-flow">通信の流れ</a></li>
+        <li><a href="#configuration">設定ファイル</a></li>
+        <li><a href="#implementation">実装内容</a></li>
+        <li><a href="#delivery">開発とデプロイ</a></li>
+        <li><a href="#operations">日常運用</a></li>
+        <li><a href="#limits">制約と次の課題</a></li>
+        <li><a href="#glossary">用語集</a></li>
+        <li><a href="#sources">参考資料</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="summary">
+        <h2><span class="num">0</span>まず結論</h2>
+        <p>
+          従来の「ReactをCaddyで配信し、GoプロセスがWebSocketとメモリ上のキャンバスを管理する」
+          構成を、Cloudflare上の3要素へ置き換えました。
+        </p>
+        <div class="summary-grid">
+          <div class="metric">
+            <strong>配信</strong>
+            <span>Reactの生成物をWorkers Static Assetsから配信</span>
+          </div>
+          <div class="metric">
+            <strong>リアルタイム処理</strong>
+            <span>Workerが<code>/ws</code>をDurable Objectへ転送</span>
+          </div>
+          <div class="metric">
+            <strong>状態管理</strong>
+            <span>Durable Objectが接続とセルを一元管理・永続化</span>
+          </div>
+        </div>
+        <div class="callout good">
+          <strong>現在の状態：</strong>
+          <span class="status">Python版をデプロイ済み</span>
+          Wranglerのデプロイ履歴で、<code>python_workers</code>を有効にした最新版が
+          100%のトラフィックを受けていることを確認済みです。
+        </div>
+        <p>
+          サーバーOS、Goプロセス、Caddy、コンテナを常時運用する代わりに、
+          Cloudflareが実行環境・配信・状態を管理します。一方で、通常のWorkerは永続的なメモリを
+          持てないため、共有キャンバスのような状態にはDurable Objectが必要です。
+        </p>
+      </section>
+
+      <section id="cloudflare">
+        <h2><span class="num">1</span>Cloudflareの技術をどう捉えるか</h2>
+        <div class="concept-grid">
+          <article class="concept">
+            <span class="icon">W</span>
+            <h3>Workers</h3>
+            <p>
+              HTTPリクエストを受けてコードを実行するサーバーレス環境です。Node.jsサーバーを
+              1台起動し続けるのではなく、Cloudflareのネットワーク上で<code>fetch()</code>が呼ばれます。
+            </p>
+          </article>
+          <article class="concept">
+            <span class="icon">DO</span>
+            <h3>Durable Objects</h3>
+            <p>
+              「名前を持つ1つの処理主体」と専用ストレージを組み合わせた仕組みです。
+              複数利用者を同じObjectへ集め、順序のある更新やWebSocketを調整できます。
+            </p>
+          </article>
+          <article class="concept">
+            <span class="icon">A</span>
+            <h3>Static Assets</h3>
+            <p>
+              Viteが生成したHTML・JavaScript・画像などをWorkerと一緒に配信する機能です。
+              この構成ではCloudflare Pagesを別に作る必要がありません。
+            </p>
+          </article>
+          <article class="concept">
+            <span class="icon">Wr</span>
+            <h3>Wrangler</h3>
+            <p>
+              Cloudflare Workers用のCLIです。Python Workerでは<code>pywrangler</code>が
+              Pythonの準備とbundleを担当し、内部でWranglerと連携します。
+            </p>
+          </article>
+        </div>
+
+        <h3>従来のサーバーとの違い</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>観点</th><th>Go + Docker構成</th><th>Cloudflare構成</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>実行単位</td>
+                <td>常時稼働するGoプロセス</td>
+                <td>リクエストやイベントで起動するWorker</td>
+              </tr>
+              <tr>
+                <td>グローバル変数</td>
+                <td>同じプロセス内なら共有できる</td>
+                <td>同じインスタンスに届く保証がなく、重要状態には使えない</td>
+              </tr>
+              <tr>
+                <td>共有状態</td>
+                <td><code>Hub.cells</code>とmutex</td>
+                <td>Durable Objectと専用ストレージ</td>
+              </tr>
+              <tr>
+                <td>WebSocket一覧</td>
+                <td>Goのmapで保持</td>
+                <td>DOランタイムの<code>getWebSockets()</code>から取得</td>
+              </tr>
+              <tr>
+                <td>静的配信</td>
+                <td>Caddyコンテナ</td>
+                <td>Workers Static Assets</td>
+              </tr>
+              <tr>
+                <td>デプロイ</td>
+                <td>イメージ作成・サーバー配置</td>
+                <td><code>pywrangler deploy</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <strong>重要な考え方：</strong>
+          通常のWorkerは高速で分散実行されますが、そのぶん「この前のリクエストと同じメモリへ届く」
+          とは考えません。共有状態が必要な部分だけを、名前で特定できるDurable Objectへ集めます。
+        </div>
+      </section>
+
+      <section id="architecture">
+        <h2><span class="num">2</span>このアプリの全体構成</h2>
+        <div class="diagram">
+          <svg viewBox="0 0 1080 560" role="img" aria-labelledby="arch-title arch-desc">
+            <title id="arch-title">共有キャンバスのCloudflare構成図</title>
+            <desc id="arch-desc">ブラウザからCloudflare Workerへ入り、通常リクエストはStatic Assetsへ、WebSocketはDurable Objectとストレージへ流れる。</desc>
+            <defs>
+              <linearGradient id="cf" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#fff7ec"/>
+                <stop offset="1" stop-color="#fff0dc"/>
+              </linearGradient>
+              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" fill="#52627b"/>
+              </marker>
+              <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#172033" flood-opacity="0.12"/>
+              </filter>
+            </defs>
+
+            <rect x="22" y="160" width="180" height="190" rx="24" fill="#ffffff" stroke="#ccd5e4" filter="url(#soft)"/>
+            <rect x="52" y="195" width="120" height="78" rx="10" fill="#eaf1ff" stroke="#1f6feb" stroke-width="2"/>
+            <rect x="64" y="208" width="96" height="48" rx="4" fill="#ffffff"/>
+            <circle cx="82" cy="224" r="6" fill="#f48120"/>
+            <path d="M96 224h48M77 241h67" stroke="#9aacbf" stroke-width="5" stroke-linecap="round"/>
+            <path d="M92 274h40l12 18H80z" fill="#9fb0c8"/>
+            <text x="112" y="320" text-anchor="middle" font-size="20" font-weight="700" fill="#172b4d">ブラウザ</text>
+            <text x="112" y="342" text-anchor="middle" font-size="13" fill="#647087">React + Canvas</text>
+
+            <path d="M204 220 C255 220 255 180 310 180" fill="none" stroke="#52627b" stroke-width="3" marker-end="url(#arrow)"/>
+            <text x="250" y="189" text-anchor="middle" font-size="13" fill="#52627b">HTTPS</text>
+            <path d="M204 295 C255 295 255 375 310 375" fill="none" stroke="#52627b" stroke-width="3" marker-end="url(#arrow)"/>
+            <text x="253" y="341" text-anchor="middle" font-size="13" fill="#52627b">WSS /ws</text>
+
+            <rect x="310" y="52" width="740" height="455" rx="30" fill="url(#cf)" stroke="#f0b170" stroke-width="2"/>
+            <text x="350" y="92" font-size="22" font-weight="800" fill="#9b3f00">Cloudflare</text>
+            <text x="350" y="116" font-size="13" fill="#7a5a3c">実行環境・配信・永続状態をマネージドで提供</text>
+
+            <rect x="350" y="142" width="230" height="105" rx="18" fill="#ffffff" stroke="#f48120" stroke-width="2" filter="url(#soft)"/>
+            <text x="465" y="180" text-anchor="middle" font-size="20" font-weight="750" fill="#172b4d">Worker</text>
+            <text x="465" y="205" text-anchor="middle" font-size="13" fill="#647087">リクエストを振り分ける入口</text>
+            <text x="465" y="226" text-anchor="middle" font-size="12" fill="#9b3f00">src/entry.py</text>
+
+            <path d="M581 180 H650" fill="none" stroke="#52627b" stroke-width="3" marker-end="url(#arrow)"/>
+            <text x="614" y="165" text-anchor="middle" font-size="12" fill="#52627b">通常HTTP</text>
+            <rect x="655" y="137" width="320" height="115" rx="18" fill="#ffffff" stroke="#1f6feb" stroke-width="2" filter="url(#soft)"/>
+            <text x="815" y="177" text-anchor="middle" font-size="20" font-weight="750" fill="#172b4d">Workers Static Assets</text>
+            <text x="815" y="204" text-anchor="middle" font-size="13" fill="#647087">frontend/dist</text>
+            <text x="815" y="227" text-anchor="middle" font-size="12" fill="#1f6feb">HTML / JavaScript / 画像</text>
+
+            <path d="M465 248 V324" fill="none" stroke="#52627b" stroke-width="3" marker-end="url(#arrow)"/>
+            <text x="486" y="289" font-size="12" fill="#52627b">/ws</text>
+            <rect x="350" y="330" width="350" height="125" rx="18" fill="#ffffff" stroke="#0f8fa8" stroke-width="2" filter="url(#soft)"/>
+            <text x="525" y="371" text-anchor="middle" font-size="20" font-weight="750" fill="#172b4d">CanvasDurableObject</text>
+            <text x="525" y="397" text-anchor="middle" font-size="13" fill="#647087">固定名: global</text>
+            <text x="525" y="422" text-anchor="middle" font-size="12" fill="#0f8fa8">WebSocket接続・検証・全員へ配信</text>
+            <text x="525" y="443" text-anchor="middle" font-size="12" fill="#0f8fa8">Hibernation API</text>
+
+            <path d="M702 393 H760" fill="none" stroke="#52627b" stroke-width="3" marker-end="url(#arrow)"/>
+            <rect x="765" y="330" width="210" height="125" rx="18" fill="#ffffff" stroke="#16835c" stroke-width="2" filter="url(#soft)"/>
+            <ellipse cx="870" cy="361" rx="58" ry="18" fill="#eaf8f2" stroke="#16835c" stroke-width="2"/>
+            <path d="M812 361v47c0 10 26 18 58 18s58-8 58-18v-47" fill="#eaf8f2" stroke="#16835c" stroke-width="2"/>
+            <path d="M812 384c0 10 26 18 58 18s58-8 58-18" fill="none" stroke="#16835c" stroke-width="2"/>
+            <text x="870" y="446" text-anchor="middle" font-size="14" font-weight="700" fill="#145b43">DO Storage</text>
+
+            <text x="350" y="488" font-size="12" fill="#7a5a3c">Binding: ASSETS / CANVAS　　Migration: v1 (SQLite-backed class)</text>
+          </svg>
+        </div>
+        <p class="caption">図1：ブラウザから見た配信経路と、Cloudflare内部での責務分担</p>
+
+        <h3>なぜ1つのDurable Objectなのか</h3>
+        <p>
+          現在の仕様は「全利用者が同じ1枚を編集する」ため、全接続を固定名<code>global</code>の
+          Objectへ送っています。同じ名前からは同じObject IDが得られるため、更新の集約点になります。
+          Go版で1つだった<code>Hub</code>を、Cloudflare上の1つのActorへ移したイメージです。
+        </p>
+        <div class="callout risk">
+          <strong>将来のスケール上の注意：</strong>
+          1つのObjectは整合性を保ちやすい反面、負荷の集中点でもあります。利用者やメッセージ数が
+          増える段階では、<code>roomId</code>ごとにDurable Objectを分ける設計が基本になります。
+        </div>
+      </section>
+
+      <section id="request-flow">
+        <h2><span class="num">3</span>実際の通信はどう流れるか</h2>
+
+        <div class="callout good">
+          <strong>質問への短い答え：</strong>
+          「ページを取得した後、Reactが<code>/ws</code>へ接続する」は合っています。
+          ただし、最初のページ取得では通常<code>worker/src/entry.py</code>のWorkerコードは実行されません。
+          Static AssetsがHTMLやJavaScriptを直接返します。<code>/ws</code>への接続時にトップレベルWorkerの
+          <code>fetch()</code>が一度呼ばれ、接続をDurable Objectへ渡します。接続成立後の
+          <code>draw</code>はDurable Objectの<code>webSocketMessage()</code>が直接処理します。
+        </div>
+
+        <h3>どの処理が、いつ呼ばれるか</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>段階</th><th>リクエスト／イベント</th><th>主に動く場所</th><th>呼ばれるコード</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1. ページ取得</td>
+                <td><code>GET /</code>、JS、CSS、画像</td>
+                <td>Workers Static Assets</td>
+                <td>通常は<code>src/entry.py</code>を通らず、Assetが直接返る</td>
+              </tr>
+              <tr>
+                <td>2. 接続開始</td>
+                <td><code>GET /ws</code> + WebSocket Upgrade</td>
+                <td>トップレベルWorker</td>
+                <td><code>Default</code>クラス側の<code>fetch()</code></td>
+              </tr>
+              <tr>
+                <td>3. 接続の受理</td>
+                <td>WorkerからDOへ転送したUpgrade</td>
+                <td><code>CanvasDurableObject</code></td>
+                <td>DOクラス側の<code>fetch()</code></td>
+              </tr>
+              <tr>
+                <td>4. 描画</td>
+                <td>接続済みWebSocket上の<code>draw</code></td>
+                <td><code>CanvasDurableObject</code></td>
+                <td><code>webSocketMessage()</code></td>
+              </tr>
+              <tr>
+                <td>5. 異常</td>
+                <td>WebSocketエラー</td>
+                <td><code>CanvasDurableObject</code></td>
+                <td><code>webSocketError()</code></td>
+              </tr>
+              <tr>
+                <td>6. 切断</td>
+                <td>WebSocket Close</td>
+                <td><code>CanvasDurableObject</code></td>
+                <td><code>webSocketClose()</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          <code>src/entry.py</code>という1ファイルに「入口となるWorker」と「状態を持つDurable Object」の
+          両方が書かれているため紛らわしく見えます。しかし、ファイル全体が接続中ずっと上から順に
+          動き続けるわけではありません。Cloudflare runtimeが、到着したイベントに対応するhandlerだけを
+          呼び出します。
+        </p>
+
+        <h3>ページを開いたとき</h3>
+        <div class="flow" aria-label="ページ表示の処理手順">
+          <div><strong>ブラウザがアクセス</strong><small>公開URLへHTTPSリクエスト</small></div>
+          <div><strong>Assetsが応答</strong><small><code>frontend/dist</code>から直接配信</small></div>
+          <div><strong>Reactが起動</strong><small>ブラウザ上で<code>useEffect</code>を実行</small></div>
+          <div><strong>WebSocket開始</strong><small><code>/ws</code>がWorkerを通ってDOへ</small></div>
+          <div><strong>snapshot受信</strong><small>DOの保存済みセルを描画</small></div>
+        </div>
+
+        <h3>ユーザーが1セル描いたとき</h3>
+        <div class="flow" aria-label="描画メッセージの処理手順">
+          <div><strong>draw送信</strong><small>座標と色をJSONで送る</small></div>
+          <div><strong>入力検証</strong><small>型・範囲・空文字を確認</small></div>
+          <div><strong>時刻を付与</strong><small><code>updatedAt</code>はサーバーが決定</small></div>
+          <div><strong>先に保存</strong><small>セルをDO Storageへ<code>put</code></small></div>
+          <div><strong>全員へ配信</strong><small>接続中の全WebSocketへbroadcast</small></div>
+        </div>
+
+        <h3>Hibernationとは</h3>
+        <p>
+          WebSocketは接続が長時間続きますが、ずっとメッセージが流れるとは限りません。
+          Hibernation APIを使うと、アイドル時にDurable Objectの実行コンテキストがメモリから
+          退避しても、接続はCloudflare側で維持されます。次のメッセージでObjectが再開します。
+        </p>
+        <p>
+          退避時にはインメモリ状態が消えるため、キャンバス本体は必ずDO Storageへ保存します。
+          接続一覧は自前の配列ではなく、再開後もランタイムから<code>getWebSockets()</code>で取得します。
+        </p>
+      </section>
+
+      <section id="configuration">
+        <h2><span class="num">4</span><code>wrangler.jsonc</code>に何を書いたか</h2>
+        <p>
+          <a href="../worker/wrangler.jsonc">worker/wrangler.jsonc</a>は、Cloudflare側の構成を宣言する
+          「デプロイ設定の正本」です。Dashboardで手作業する代わりに、設定をGitでレビューできます。
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>設定</th><th>現在値</th><th>意味</th></tr></thead>
+            <tbody>
+              <tr><td><code>name</code></td><td><code>shared-canvas</code></td><td>Cloudflare上のWorker名</td></tr>
+              <tr><td><code>main</code></td><td><code>src/entry.py</code></td><td>Python Workerのエントリーポイント</td></tr>
+              <tr><td><code>compatibility_date</code></td><td><code>2026-08-11</code></td><td>現行workerdが対応する互換挙動を固定する日付</td></tr>
+              <tr><td><code>compatibility_flags</code></td><td><code>["python_workers"]</code></td><td>Python Workers runtimeを有効化</td></tr>
+              <tr><td><code>assets.directory</code></td><td><code>../frontend/dist</code></td><td>アップロードするViteの生成物</td></tr>
+              <tr><td><code>assets.binding</code></td><td><code>ASSETS</code></td><td>コードから<code>env.ASSETS</code>として参照</td></tr>
+              <tr><td><code>not_found_handling</code></td><td><code>single-page-application</code></td><td>React Router等のパスでもindex.htmlへ戻せる</td></tr>
+              <tr><td><code>run_worker_first</code></td><td><code>["/ws"]</code></td><td>WebSocketだけはAssetより先にWorkerへ通す</td></tr>
+              <tr><td><code>CANVAS</code></td><td><code>CanvasDurableObject</code></td><td>DO namespaceをコードへ注入するbinding</td></tr>
+              <tr><td><code>migrations.v1</code></td><td><code>new_sqlite_classes</code></td><td>SQLiteベースの新しいDOクラスを登録</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details>
+          <summary>実際の設定を見る</summary>
+          <div>
+<pre><code>{
+  "name": "shared-canvas",
+  "main": "src/entry.py",
+  "compatibility_date": "2026-08-11",
+  "compatibility_flags": ["python_workers"],
+  "assets": {
+    "directory": "../frontend/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/ws"]
+  },
+  "durable_objects": {
+    "bindings": [{
+      "name": "CANVAS",
+      "class_name": "CanvasDurableObject"
+    }]
+  },
+  "migrations": [{
+    "tag": "v1",
+    "new_sqlite_classes": ["CanvasDurableObject"]
+  }]
+}</code></pre>
+          </div>
+        </details>
+
+        <div class="callout">
+          <strong>migrationの意味：</strong>
+          これはD1のSQL migrationではなく、「CloudflareアカウントにこのDurable Objectクラスを
+          新設する」というクラス構成の履歴です。同じtagを書き換えず、将来変更するときは
+          <code>v2</code>を追加します。
+        </div>
+      </section>
+
+      <section id="implementation">
+        <h2><span class="num">5</span>Python実装に何を書いたか</h2>
+        <div class="file-grid">
+          <article class="file-card">
+            <h3><a href="../worker/src/entry.py">src/entry.py</a></h3>
+            <p>Workerのルーティング、DOクラス、WebSocket接続、保存、broadcastを実装。</p>
+          </article>
+          <article class="file-card">
+            <h3><a href="../worker/src/protocol.py">src/protocol.py</a></h3>
+            <p>メッセージ型、128×128の制約、JSON検証、ストレージキーを定義。</p>
+          </article>
+          <article class="file-card">
+            <h3><a href="../worker/tests/test_protocol.py">tests/test_protocol.py</a></h3>
+            <p>正常なdraw、不正JSON、範囲外座標、空色、キー順序をテスト。</p>
+          </article>
+          <article class="file-card">
+            <h3><a href="../worker/pyproject.toml">pyproject.toml</a></h3>
+            <p>Python 3.12、<code>workers-py</code>、runtime SDK、Ruffを定義。</p>
+          </article>
+        </div>
+
+        <div class="callout risk">
+          <strong>Python Workersはベータ：</strong>
+          PythonはCPython/PyodideをWebAssemblyとしてWorkers runtime内で動かします。
+          JavaScript製のWorkers APIはFFIを通して呼び出せますが、仕様更新の影響を受ける可能性があるため、
+          本番運用ではCloudflareのリリースノートと既知の制約を確認します。
+        </div>
+
+        <h3>Bindingは「Cloudflareが渡してくれる接続口」</h3>
+<pre><code>stub = self.env.CANVAS.getByName("global")
+return await stub.fetch(request)
+
+return await self.env.ASSETS.fetch(request)</code></pre>
+        <p>
+          <code>ASSETS</code>や<code>CANVAS</code>を自分でnewすることはありません。
+          <code>wrangler.jsonc</code>の定義に基づいてCloudflare runtimeが<code>env</code>へ渡します。
+          D1、KV、R2、Secretなどを将来追加する場合も、基本的に同じbindingの考え方です。
+        </p>
+
+        <h3>Durable Objectを使うために必要な記述の全体像</h3>
+        <p>
+          Durable Objectはクラスを書くだけでは利用できません。設定とコードの対応が必要です。
+          このプロジェクトでは次の8段階を記述しています。
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>段階</th><th>記述場所</th><th>記述内容</th><th>役割</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td><code>wrangler.jsonc</code></td><td><code>durable_objects.bindings</code></td><td>binding名と実装クラス名を結び付ける</td></tr>
+              <tr><td>2</td><td><code>wrangler.jsonc</code></td><td><code>new_sqlite_classes</code></td><td>SQLiteベースのDOクラスをCloudflareへ登録する</td></tr>
+              <tr><td>3</td><td><code>wrangler.jsonc</code></td><td><code>python_workers</code></td><td>Python runtimeを有効にする</td></tr>
+              <tr><td>4</td><td><code>src/entry.py</code></td><td><code>class ... (DurableObject)</code></td><td>Cloudflareが起動するDOクラスを実装・公開する</td></tr>
+              <tr><td>5</td><td>Workerの<code>fetch()</code></td><td><code>getByName()</code></td><td>対象Objectのstubを取得する</td></tr>
+              <tr><td>6</td><td>DOの<code>fetch()</code></td><td><code>WebSocketPair</code>と<code>acceptWebSocket()</code></td><td>WebSocket Upgradeを受理する</td></tr>
+              <tr><td>7</td><td>DOのevent handler</td><td><code>webSocketMessage()</code></td><td>接続後のメッセージを処理する</td></tr>
+              <tr><td>8</td><td>DOのevent handler</td><td><code>ctx.storage</code>と<code>getWebSockets()</code></td><td>状態の永続化と全接続への配信を行う</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>1. bindingとmigrationを宣言する</h3>
+<pre><code>"durable_objects": {
+  "bindings": [{
+    "name": "CANVAS",
+    "class_name": "CanvasDurableObject"
+  }]
+},
+"migrations": [{
+  "tag": "v1",
+  "new_sqlite_classes": ["CanvasDurableObject"]
+}]</code></pre>
+        <ul>
+          <li><code>name: "CANVAS"</code>はWorkerコードから使うbinding名です。</li>
+          <li><code>class_name</code>はPythonモジュール直下のクラス名と完全に一致させます。</li>
+          <li><code>new_sqlite_classes</code>は、新規クラスにSQLite-backed storageを割り当てます。</li>
+          <li><code>tag: "v1"</code>はDOクラス構成の履歴です。将来の変更は<code>v2</code>として追記します。</li>
+        </ul>
+
+        <h3>2. Python Workers runtimeを有効にする</h3>
+<pre><code>"main": "src/entry.py",
+"compatibility_flags": ["python_workers"]</code></pre>
+        <p>
+          <code>main</code>はPythonモジュールを指定し、互換フラグでPython runtimeを有効にします。
+          Pythonの標準入口は<code>WorkerEntrypoint</code>を継承した<code>Default</code>クラスです。
+        </p>
+
+        <h3>3. Cloudflareが起動できるPythonクラスを書く</h3>
+<pre><code>from workers import DurableObject
+
+class CanvasDurableObject(DurableObject):
+    async def fetch(self, request):
+        # WebSocket Upgradeを受理する
+        ...</code></pre>
+        <p>
+          クラスをモジュール直下へ定義すると、Wranglerの<code>class_name</code>からruntimeが見つけます。
+          <code>DurableObject</code>を継承すると、<code>self.ctx</code>から専用ストレージや
+          Hibernation WebSocket APIを利用できます。
+        </p>
+
+        <h3>4. 固定名から同じObjectを選び、stubへ転送する</h3>
+<pre><code>stub = self.env.CANVAS.getByName("global")
+return await stub.fetch(request)</code></pre>
+        <p>
+          <code>getByName("global")</code>は、同じ名前から常に同じIDを決め、そのObjectへ操作を送る
+          stubを取得します。
+          <code>stub.fetch(request)</code>でWebSocket Upgradeを転送します。Objectは必要になった時点で
+          Cloudflareが遅延起動します。
+        </p>
+
+        <h3>5. DO側でWebSocket接続を受理する</h3>
+<pre><code>client, server = WebSocketPair.new().object_values()
+
+self.ctx.acceptWebSocket(server)
+
+return Response(None, status=101, web_socket=client)</code></pre>
+        <ul>
+          <li><code>WebSocketPair</code>は、クライアント側とサーバー側の2端点を作ります。</li>
+          <li><code>client</code>はHTTP 101レスポンスに載せてブラウザへ返します。</li>
+          <li><code>server</code>はDurable Objectが保持します。</li>
+          <li><code>ctx.acceptWebSocket(server)</code>を使うことでHibernation対応になります。</li>
+        </ul>
+        <div class="callout">
+          <strong>似た名前の<code>fetch()</code>に注意：</strong>
+          トップレベルWorkerの<code>fetch()</code>は公開URLの入口、DOクラスの<code>fetch()</code>は
+          stubから転送されたリクエストの入口です。同じ名前でも、別のオブジェクトに属する別handlerです。
+        </div>
+
+        <h3>6. 接続後は専用handlerでメッセージを受ける</h3>
+<pre><code>async def webSocketMessage(self, _socket, message):
+    # validate → persist → broadcast
+    ...</code></pre>
+        <p>
+          一度101で接続が成立した後は、各メッセージについてトップレベルWorkerの<code>fetch()</code>を
+          再実行しません。Cloudflare runtimeが、接続を受理したDOの<code>webSocketMessage()</code>へ
+          イベントを直接配送します。DOがHibernation中なら、このイベントで再起動してからhandlerを呼びます。
+        </p>
+
+        <h3>7. 重要な状態をDO専用ストレージへ保存する</h3>
+<pre><code>await self.ctx.storage.put(
+    "cell:009:007",
+    {"x": 7, "y": 9, "color": "#123456", "updatedAt": 1710000000000},
+)</code></pre>
+        <p>
+          新しいSQLiteベースのDurable Object上で、key-value形式のStorage APIを利用しています。
+          これはCloudflare KVという別製品ではなく、そのObject専用の強整合ストレージです。
+        </p>
+
+        <p>
+          接続時には<code>await self.ctx.storage.list({"prefix": "cell:"})</code>で全セルを読み、
+          <code>snapshot</code>を作ります。描画時は配信より先に<code>put()</code>を完了させるため、
+          他のクライアントが受け取った描画が再接続後に消える状態を避けています。
+          SDKがJavaScriptの<code>Map</code>をPythonの<code>dict</code>へ変換するので、
+          TypeScript版と同じ保存データをそのまま利用できます。
+        </p>
+
+        <h3>8. ランタイム管理の接続一覧へbroadcastする</h3>
+<pre><code>for socket in self.ctx.getWebSockets():
+    socket.send(payload)</code></pre>
+        <p>
+          接続一覧をクラスプロパティやグローバル変数へ保存しません。Hibernationや再起動でメモリは
+          消えるため、接続はランタイム管理の<code>getWebSockets()</code>から毎回取得します。
+          キャンバス状態はStorage、現在の接続はWebSocket runtime、という責務分担です。
+        </p>
+
+        <h3>このDOに<code>__init__</code>がない理由</h3>
+        <p>
+          現在はSQL table作成などの初期化処理も、復元が必要なインメモリキャッシュもないため、
+          明示的な<code>__init__</code>は不要です。将来SQL schemaを作る場合は<code>__init__</code>で
+          <code>ctx.blockConcurrencyWhile()</code>を使って初期化できますが、通常のメッセージ処理全体を
+          そこで囲むと同時処理性能を落とすため、初期化だけに限定します。
+        </p>
+
+        <h3>WebSocketプロトコル</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>方向</th><th>type</th><th>役割</th></tr></thead>
+            <tbody>
+              <tr><td>クライアント → DO</td><td><code>draw</code></td><td><code>x</code>、<code>y</code>、<code>color</code>を送信</td></tr>
+              <tr><td>DO → 全クライアント</td><td><code>draw</code></td><td>保存済みの描画とサーバー時刻を配信</td></tr>
+              <tr><td>DO → 接続直後のクライアント</td><td><code>snapshot</code></td><td>現在保存されている全セルを送信</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="delivery">
+        <h2><span class="num">6</span>ローカル開発から公開まで</h2>
+        <p>
+          <a href="../worker/package.json">worker/package.json</a>に、複数ディレクトリをまたぐ処理を
+          npm scriptとしてまとめました。コマンドを覚えるより、目的に応じてscriptを選べば済みます。
+          Pythonの依存関係は<code>pyproject.toml</code>と<code>uv.lock</code>、Workers runtime向けの
+          解決結果は<code>pylock.toml</code>で固定します。
+        </p>
+
+        <div class="callout risk">
+          <strong>Node.jsは22 LTSを使用：</strong>
+          現在の<code>pywrangler 1.16.2</code>が利用するPyodideは、Node.js 26で削除された
+          Wasmオプションをまだ使用します。このリポジトリは<code>.node-version</code>と
+          <code>package.json</code>でNode 22系を指定しています。
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>目的</th><th>コマンド</th><th>内部で行うこと</th></tr></thead>
+            <tbody>
+              <tr><td>ローカル起動</td><td><code>npm run dev</code></td><td>Vite build → <code>pywrangler dev</code></td></tr>
+              <tr><td>総合チェック</td><td><code>npm run check</code></td><td>Ruff、Pythonテスト、フロントlint/build、deploy dry-run</td></tr>
+              <tr><td>構成確認用ビルド</td><td><code>npm run build</code></td><td>Vite build → <code>pywrangler deploy --dry-run</code></td></tr>
+              <tr><td>Cloudflareへ公開</td><td><code>npm run deploy</code></td><td>Vite build → <code>pywrangler deploy</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>初回に実際に行ったこと</h3>
+        <ol>
+          <li><code>uv sync</code>でPython依存を導入し、<code>uv.lock</code>を生成。</li>
+          <li>Ruff、Pythonプロトコルテスト、フロントのlintとbuildを実行。</li>
+          <li>dry-runでWorker bundle、Assets、DO binding、migrationを検証。</li>
+          <li><code>pywrangler dev</code>でローカルWorkerとローカルDO Storageを起動。</li>
+          <li>複数WebSocketへのbroadcastと、再接続後のsnapshot復元を確認。</li>
+          <li>Python版をCloudflareへデプロイ。</li>
+          <li>デプロイ履歴から<code>python_workers</code>版が100%配信中であることを確認。</li>
+        </ol>
+
+        <div class="callout good">
+          <strong>デプロイ時に自動で行われること：</strong>
+          Workerコードのbundle、静的アセットのアップロード、binding設定、DOクラスmigration、
+          新バージョンへの切り替えです。別途D1やKVを手作業で作る工程はありません。
+        </div>
+      </section>
+
+      <section id="operations">
+        <h2><span class="num">7</span>日常運用で使うもの</h2>
+        <div class="ops-grid">
+          <div>
+            <h3>ローカルで試す</h3>
+            <div class="command">cd worker<br />npm run dev</div>
+            <p>通常は<code>http://localhost:8787</code>で起動します。ローカルの状態は<code>.wrangler/</code>配下です。</p>
+          </div>
+          <div>
+            <h3>変更前に確認する</h3>
+            <div class="command">cd worker<br />npm run check</div>
+            <p>Python lint・テスト・フロント・Wrangler設定をまとめて検証します。</p>
+          </div>
+          <div>
+            <h3>本番ログを見る</h3>
+            <div class="command">cd worker<br />npx wrangler tail</div>
+            <p>Workerで発生したリクエストログや例外をリアルタイムに確認します。</p>
+          </div>
+          <div>
+            <h3>バージョンを確認する</h3>
+            <div class="command">cd worker<br />npx wrangler deployments list</div>
+            <p>どのバージョンが何%のトラフィックを受けているか確認します。</p>
+          </div>
+        </div>
+
+        <h3>設定変更の基本ルール</h3>
+        <ul>
+          <li><code>wrangler.jsonc</code>をCloudflare構成の正本としてGit管理する。</li>
+          <li>bindingを追加・変更したらPythonの<code>self.env.&lt;名前&gt;</code>と一致させる。</li>
+          <li>Python Workersはベータなので、<code>workers-py</code>とruntime SDKの更新時にスモークテストする。</li>
+          <li>DOクラス構成を変えるときは既存tagを編集せず、新しいmigration tagを追加する。</li>
+          <li>APIキーなどの秘密情報は設定ファイルへ書かず、<code>wrangler secret put</code>を使う。</li>
+          <li><code>compatibility_date</code>は無計画に更新せず、テストとセットで更新する。</li>
+        </ul>
+
+        <h3>障害時の確認順</h3>
+        <ol>
+          <li>ページ自体が開くか。開かなければAssetsまたはWorkerのデプロイを確認。</li>
+          <li>ブラウザの開発者ツールで<code>/ws</code>がHTTP 101になっているか確認。</li>
+          <li><code>npx wrangler tail</code>でWorker/DO例外を確認。</li>
+          <li>最新deploymentと直前versionを確認し、変更内容を切り分ける。</li>
+          <li>ローカルの<code>npm run check</code>と2クライアント試験で再現を確認。</li>
+        </ol>
+      </section>
+
+      <section id="limits">
+        <h2><span class="num">8</span>現在の制約と、次に考えること</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>項目</th><th>現在</th><th>次の判断</th></tr></thead>
+            <tbody>
+              <tr><td>キャンバス数</td><td>固定名<code>global</code>の1枚</td><td>利用規模が増えたらroom単位でDOを分割</td></tr>
+              <tr><td>認証</td><td>なし</td><td>誰が描けるかを制限する場合に追加</td></tr>
+              <tr><td>入力制限</td><td>座標・型・空色のみ</td><td>色形式、メッセージサイズ、頻度制限を追加</td></tr>
+              <tr><td>大量描画</td><td>セルごとに1 WebSocket message</td><td>複数セルのbatch化を検討</td></tr>
+              <tr><td>snapshot</td><td>全セルを一括送信</td><td>大規模化時に圧縮・バイナリ化を検討</td></tr>
+              <tr><td>環境</td><td>単一のデプロイ設定</td><td>staging / productionを分離</td></tr>
+              <tr><td>テスト</td><td>純粋関数テスト＋ローカルスモークテスト</td><td>Workers runtime内のDO統合テストを自動化</td></tr>
+              <tr><td>監視</td><td>必要時に<code>wrangler tail</code></td><td>構造化ログ、メトリクス、アラートを追加</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <strong>いまの構成は「移行の第一段階」として適切：</strong>
+          既存の挙動を保ちながら実行基盤だけを置き換えています。認証やroom分割を同時に入れなかったため、
+          不具合が起きた場合も「基盤移行」と「機能追加」を分けて考えられます。
+        </div>
+      </section>
+
+      <section id="glossary">
+        <h2><span class="num">9</span>用語集</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>用語</th><th>このプロジェクトでの意味</th></tr></thead>
+            <tbody>
+              <tr><td>Worker</td><td>HTTPの入口。<code>/ws</code>をDOへ、それ以外をAssetsへ振り分ける。</td></tr>
+              <tr><td>Isolate</td><td>Workerコードが動く軽量な実行コンテキスト。長寿命や同一性を前提にしない。</td></tr>
+              <tr><td>Durable Object</td><td>特定名で到達できる、状態と処理をまとめた実体。今回は共有キャンバス1枚。</td></tr>
+              <tr><td>Namespace</td><td>同じDOクラスのObjectを取得する入口。コード上では<code>env.CANVAS</code>。</td></tr>
+              <tr><td>Binding</td><td>CloudflareリソースをWorkerの<code>env</code>へ安全に渡す接続設定。</td></tr>
+              <tr><td>Migration</td><td>Durable Objectクラスの追加・変更履歴。現在は<code>v1</code>。</td></tr>
+              <tr><td>Hibernation</td><td>WebSocket接続を保ったまま、アイドル中のDO実行コンテキストを休止できる仕組み。</td></tr>
+              <tr><td>Static Assets</td><td>Viteが生成したHTML、JS、画像などの配信機能。</td></tr>
+              <tr><td>Wrangler</td><td>ローカル実行、検証、ログ、デプロイを行うCloudflare公式CLI。</td></tr>
+              <tr><td>pywrangler</td><td>Python Workerの依存解決・bundleとWrangler連携を行う公式CLI。</td></tr>
+              <tr><td>Pyodide</td><td>CPythonをWebAssembly化し、PythonとWorkersのJavaScript APIをFFIで接続する基盤。</td></tr>
+              <tr><td>compatibility_date</td><td>採用するWorkers runtimeの互換挙動を固定する日付。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="sources">
+        <h2><span class="num">10</span>参考資料と関連ファイル</h2>
+        <h3>Cloudflare公式ドキュメント</h3>
+        <ul class="sources">
+          <li><a href="https://developers.cloudflare.com/workers/reference/how-workers-works/">How Workers works</a> — isolate、リクエスト単位の実行、分散実行</li>
+          <li><a href="https://developers.cloudflare.com/durable-objects/concepts/what-are-durable-objects/">What are Durable Objects?</a> — 名前付きObject、専用ストレージ、単一スレッドの調整</li>
+          <li><a href="https://developers.cloudflare.com/durable-objects/best-practices/websockets/">Use WebSockets</a> — Hibernation WebSocket API</li>
+          <li><a href="https://developers.cloudflare.com/workers/static-assets/binding/">Static Assets configuration and bindings</a> — Assets bindingとルーティング</li>
+          <li><a href="https://developers.cloudflare.com/workers/static-assets/routing/worker-script/">Static Assets: Worker script</a> — Asset-firstと選択的Worker-firstの実行順</li>
+          <li><a href="https://developers.cloudflare.com/durable-objects/api/namespace/">Durable Object Namespace</a> — 名前、ID、stub、遅延起動</li>
+          <li><a href="https://developers.cloudflare.com/workers/get-started/guide/">Workers CLI guide</a> — Wranglerによるローカル開発とデプロイ</li>
+          <li><a href="https://developers.cloudflare.com/workers/languages/python/">Python Workers</a> — Python runtime、pywrangler、ベータ状況</li>
+          <li><a href="https://developers.cloudflare.com/workers/languages/python/ffi/">Python Workers FFI</a> — PythonからWorkers APIとbindingを使う仕組み</li>
+          <li><a href="https://developers.cloudflare.com/durable-objects/platform/pricing/">Durable Objects pricing</a> — Free/Paidプランと利用量の考え方</li>
+        </ul>
+
+        <h3>リポジトリ内の資料</h3>
+        <p>
+          <a href="architecture.md">アーキテクチャ</a> / 
+          <a href="cloudflare-migration.md">移行計画</a> / 
+          <a href="adr/0001-use-durable-objects.md">ADR 0001</a> / 
+          <a href="../README.md">README</a> / 
+          <a href="../AGENTS.md">LLM向け作業規約</a>
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <div class="footer-inner">
+      <p><strong>共有キャンバス Cloudflare Workers導入レポート</strong></p>
+      <p><small>作成日: 2026-08-11 ／ 更新日: 2026-08-12 ／ 対象ブランチ: feat/cloudflare-workers-durable-objects</small></p>
+      <p><small>本資料はリポジトリの実装とCloudflare公式ドキュメントを基に作成しています。</small></p>
+    </div>
+  </footer>
+</body>
+</html>
