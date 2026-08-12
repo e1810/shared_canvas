@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - feat/ec2
 
 # 二重で実行しない 新しい方優先
 concurrency:
