@@ -278,12 +278,14 @@ export default function App() {
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
           onPointerLeave={handlePointerUp}
           style={{
             border: "1px solid black",
             backgroundColor: "#ffffff",
             imageRendering: "pixelated",
             cursor: "crosshair",
+            touchAction: "none",
           }}
         />
       </div>
