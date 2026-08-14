@@ -42,6 +42,7 @@ Durable Objectは次の処理を担当します。
 - Hibernation WebSocket APIでサーバー側ソケットを受け入れる。
 - ソケット接続時に永続化済みの`snapshot`を送信する。
 - 受信した`draw`メッセージを検証する。
+- 受信した`clear`メッセージに応じて、キャンバスを初期化する。
 - サーバー側で時刻を設定する。
 - 更新を配信する前にセルを永続化する。
 - インメモリのクライアント一覧を持たず、Durable Objectランタイムから接続中の
@@ -62,6 +63,16 @@ Pythonのメソッド名`webSocketMessage`、`webSocketClose`、`webSocketError`
 Python SDKはStorage APIが返すJavaScriptの`Map`をPythonの`dict`へ自動変換します。
 このため、既存のTypeScript版が保存した同じキーを`storage.list()`で読み出せます。
 
+最後にキャンバスを初期化した時刻は`meta:clearedAt`へUnix時刻のミリ秒単位で
+保存します。このキーがまだない場合は、グローバルキャンバスへの最初の接続時刻を
+保存します。Hibernationから復帰した場合も、Durable Objectのコンストラクタで
+永続化済みの値を復元してからイベントを処理します。
+
+`clear`を受信すると、SQLiteベースのDurable Objectストレージを`deleteAll()`で
+削除してから、新しい`meta:clearedAt`を保存します。保存が完了した後、空の
+`snapshot`を全クライアントへ配信します。現在、このObjectのストレージはキャンバス
+状態だけを所有するため、`deleteAll()`の対象に他機能の状態は含まれません。
+
 ## WebSocketプロトコル
 
 クライアントからサーバーへの描画要求：
@@ -79,8 +90,21 @@ Python SDKはStorage APIが返すJavaScriptの`Map`をPythonの`dict`へ自動�
 接続直後の`snapshot`：
 
 ```json
-{"type":"snapshot","cells":[{"x":12,"y":34,"color":"#ff0000","updatedAt":1710000000000}]}
+{"type":"snapshot","cells":[{"x":12,"y":34,"color":"#ff0000","updatedAt":1710000000000}],"clearedAt":1709999000000}
+```
+
+クライアントからサーバーへのキャンバス初期化要求：
+
+```json
+{"type":"clear"}
+```
+
+初期化後に全クライアントへ配信される`snapshot`：
+
+```json
+{"type":"snapshot","cells":[],"clearedAt":1710001000000}
 ```
 
 不正なメッセージと範囲外の座標は無視します。これは従来のGoサーバーから観測できる
-挙動と同じです。
+挙動と同じです。`updatedAt`と`clearedAt`はサーバーが設定し、クライアントから
+送られた値は無視します。

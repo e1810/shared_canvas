@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from src.protocol import cell_storage_key, parse_draw_message
+from src.protocol import cell_storage_key, parse_client_message
 
 
 class ParseDrawMessageTest(unittest.TestCase):
@@ -17,7 +17,7 @@ class ParseDrawMessageTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            parse_draw_message(value),
+            parse_client_message(value),
             {"type": "draw", "x": 12, "y": 34, "color": "#ff0000"},
         )
 
@@ -35,7 +35,14 @@ class ParseDrawMessageTest(unittest.TestCase):
 
         for value in values:
             with self.subTest(value=value):
-                self.assertIsNone(parse_draw_message(value))
+                self.assertIsNone(parse_client_message(value))
+
+
+class ParseClearMessageTest(unittest.TestCase):
+    def test_accepts_clear_and_ignores_client_timestamp(self):
+        value = json.dumps({"type": "clear", "clearedAt": 1})
+
+        self.assertEqual(parse_client_message(value), {"type": "clear"})
 
 
 class CellStorageKeyTest(unittest.TestCase):

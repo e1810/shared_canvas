@@ -26,18 +26,22 @@ type DrawMessage = {
 type SnapshotMessage = {
   type: "snapshot";
   cells: Cell[];
+  clearedAt: number;
+};
+
+type ClearMessage = {
+  type: "clear";
 };
 
 type ServerMessage = DrawMessage | SnapshotMessage;
-
-
 
 export default function App() {
   const wsRef = useRef<WebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [color, setColor] = useState("#ff0000");
-  const [, setConnected] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [clearedAt, setClearedAt] = useState<number>();
 
   useEffect(() => {
     function drawCell(x: number, y: number, color: string) {
@@ -58,19 +62,26 @@ export default function App() {
       );
     }
 
-    function drawSnapshot(cells: Cell[]) {
+    function clearCanvas() {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawSnapshot(cells: Cell[]) {
+      clearCanvas();
 
       for (const cell of cells) {
         drawCell(cell.x, cell.y, cell.color);
       }
     }
+
+    clearCanvas();
 
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
@@ -87,6 +98,7 @@ export default function App() {
       switch (msg.type) {
         case "snapshot":
           drawSnapshot(msg.cells);
+          setClearedAt(msg.clearedAt);
           break;
 
         case "draw":
@@ -218,15 +230,45 @@ export default function App() {
     }
   }
 
+  function handleReset() {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    const message: ClearMessage = { type: "clear" };
+    ws.send(JSON.stringify(message));
+  }
+
+  const clearedAtLabel = clearedAt === undefined
+    ? "Connecting..."
+    : new Date(clearedAt).toLocaleString();
+
   return (
     <div>
       <h1>Shared Canvas</h1>
 
-      <input
-        type="color"
-        value={color}
-        onChange={(e) => setColor(e.target.value)}
-      />
+      <div className="canvas-controls">
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          aria-label="Drawing color"
+        />
+
+        <button type="button" onClick={handleReset} disabled={!connected}>
+          Reset
+        </button>
+
+        <span className="cleared-at" aria-live="polite">
+          Last reset:{" "}
+          {clearedAt === undefined ? (
+            clearedAtLabel
+          ) : (
+            <time dateTime={new Date(clearedAt).toISOString()}>
+              {clearedAtLabel}
+            </time>
+          )}
+        </span>
+      </div>
 
       <div style={{ marginTop: 12 }}>
         <canvas
@@ -239,6 +281,7 @@ export default function App() {
           onPointerLeave={handlePointerUp}
           style={{
             border: "1px solid black",
+            backgroundColor: "#ffffff",
             imageRendering: "pixelated",
             cursor: "crosshair",
           }}

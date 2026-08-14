@@ -71,3 +71,4 @@ SQLiteベースのDurable Objectクラスが作成されます。
 - [アーキテクチャ](docs/architecture.md)
 - [Cloudflare移行計画](docs/cloudflare-migration.md)
 - [Durable Objectsの設計判断記録](docs/adr/0001-use-durable-objects.md)
+- [共有キャンバスのResetに関する設計判断記録](docs/adr/0002-reset-shared-canvas.md)

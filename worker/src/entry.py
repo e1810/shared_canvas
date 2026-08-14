@@ -9,14 +9,37 @@ from urllib.parse import urlparse
 from js import WebSocketPair
 from workers import DurableObject, Response, WorkerEntrypoint
 
-from protocol import Cell, SnapshotMessage, cell_storage_key, parse_draw_message
+from protocol import Cell, SnapshotMessage, cell_storage_key, parse_client_message
 
 GLOBAL_CANVAS_NAME = "global"
 CELL_KEY_PREFIX = "cell:"
+CLEARED_AT_KEY = "meta:clearedAt"
+
+
+def current_time_ms() -> int:
+    """現在時刻をJavaScriptのDateと同じミリ秒単位で返す。"""
+
+    return time.time_ns() // 1_000_000
 
 
 class CanvasDurableObject(DurableObject):
     """キャンバス状態と接続中の WebSocket を一つの場所で調停する。"""
+
+    def __init__(self, ctx, env):
+        super().__init__(ctx, env)
+        self.cleared_at: int | None = None
+
+        async def initialize_cleared_at():
+            stored = await self.ctx.storage.get(CLEARED_AT_KEY)
+            if type(stored) is int:
+                self.cleared_at = stored
+                return
+
+            self.cleared_at = current_time_ms()
+            await self.ctx.storage.put(CLEARED_AT_KEY, self.cleared_at)
+
+        # 初回接続やHibernationからの復帰後に、時刻を必ず復元してから処理する。
+        self.ctx.blockConcurrencyWhile(initialize_cleared_at)
 
     async def fetch(self, request):
         upgrade = request.headers.get("Upgrade")
@@ -29,9 +52,11 @@ class CanvasDurableObject(DurableObject):
         # Storage API の Map は workers-runtime-sdk により dict へ変換される。
         # TypeScript 版と同じキーを読むため、既存の保存状態も引き継げる。
         stored_cells = await self.ctx.storage.list({"prefix": CELL_KEY_PREFIX})
+        assert self.cleared_at is not None
         snapshot: SnapshotMessage = {
             "type": "snapshot",
             "cells": list(stored_cells.values()),
+            "clearedAt": self.cleared_at,
         }
         server.send(json.dumps(snapshot, separators=(",", ":")))
 
@@ -41,11 +66,25 @@ class CanvasDurableObject(DurableObject):
         if not isinstance(message, str):
             return
 
-        incoming = parse_draw_message(message)
+        incoming = parse_client_message(message)
         if incoming is None:
             return
 
-        updated_at = time.time_ns() // 1_000_000
+        if incoming["type"] == "clear":
+            await self.ctx.storage.deleteAll()
+            cleared_at = current_time_ms()
+            await self.ctx.storage.put(CLEARED_AT_KEY, cleared_at)
+            self.cleared_at = cleared_at
+
+            snapshot: SnapshotMessage = {
+                "type": "snapshot",
+                "cells": [],
+                "clearedAt": cleared_at,
+            }
+            self.broadcast(snapshot)
+            return
+
+        updated_at = current_time_ms()
         outgoing = {
             "type": "draw",
             "x": incoming["x"],
@@ -63,7 +102,12 @@ class CanvasDurableObject(DurableObject):
         # 永続化が成功してから配信し、再接続時の snapshot と矛盾させない。
         await self.ctx.storage.put(cell_storage_key(cell["x"], cell["y"]), cell)
 
-        payload = json.dumps(outgoing, separators=(",", ":"))
+        self.broadcast(outgoing)
+
+    def broadcast(self, message):
+        """接続中の全クライアントへJSONメッセージを配信する。"""
+
+        payload = json.dumps(message, separators=(",", ":"))
         for socket in self.ctx.getWebSockets():
             try:
                 socket.send(payload)

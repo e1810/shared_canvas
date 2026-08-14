@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 GRID_SIZE = 128
 
@@ -16,26 +16,40 @@ class Cell(TypedDict):
 
 
 class DrawMessage(TypedDict):
-    type: str
+    type: Literal["draw"]
     x: int
     y: int
     color: str
 
 
+class ClearMessage(TypedDict):
+    type: Literal["clear"]
+
+
 class SnapshotMessage(TypedDict):
-    type: str
+    type: Literal["snapshot"]
     cells: list[Cell]
+    clearedAt: int
 
 
-def parse_draw_message(value: str) -> DrawMessage | None:
-    """正しい draw メッセージだけを返し、その他の入力は捨てる。"""
+ClientMessage = DrawMessage | ClearMessage
+
+
+def parse_client_message(value: str) -> ClientMessage | None:
+    """正しいクライアントメッセージだけを返し、その他の入力は捨てる。"""
 
     try:
         candidate = json.loads(value)
     except (json.JSONDecodeError, TypeError):
         return None
 
-    if not isinstance(candidate, dict) or candidate.get("type") != "draw":
+    if not isinstance(candidate, dict):
+        return None
+
+    message_type = candidate.get("type")
+    if message_type == "clear":
+        return {"type": "clear"}
+    if message_type != "draw":
         return None
 
     x = candidate.get("x")

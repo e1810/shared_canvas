@@ -95,6 +95,29 @@ p {
   margin: 0;
 }
 
+.canvas-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.canvas-controls button {
+  font: inherit;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.canvas-controls button:disabled {
+  cursor: not-allowed;
+}
+
+.cleared-at {
+  color: var(--text-h);
+  font-size: 14px;
+}
+
 code,
 .counter {
   font-family: var(--mono);
