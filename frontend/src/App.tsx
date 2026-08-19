@@ -2,6 +2,16 @@ import { useEffect, useRef, useState } from "react";
 
 const GRID_SIZE = 128;
 const CANVAS_PX = 512;
+const COLOR_PRESETS = [
+  "#111827",
+  "#f43f5e",
+  "#f97316",
+  "#facc15",
+  "#22c55e",
+  "#0ea5e9",
+  "#6366f1",
+  "#a855f7",
+];
 
 type Point = {
   x: number;
@@ -180,11 +190,9 @@ export default function App() {
       return;
     }
 
-    const cellSize = CANVAS_PX / GRID_SIZE;
-
     const currentCell: Point = {
-      x: Math.floor(px / cellSize),
-      y: Math.floor(py / cellSize)
+      x: Math.floor(px / (rect.width / GRID_SIZE)),
+      y: Math.floor(py / (rect.height / GRID_SIZE))
     };
 
     // 同じセルならメッセージは送らない
@@ -239,56 +247,115 @@ export default function App() {
   }
 
   const clearedAtLabel = clearedAt === undefined
-    ? "Connecting..."
-    : new Date(clearedAt).toLocaleString();
+    ? "同期中"
+    : new Date(clearedAt).toLocaleString("ja-JP", {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
 
   return (
-    <div>
-      <h1>Shared Canvas</h1>
+    <main className="app-shell">
+      <header className="site-header">
+        <a className="brand" href="/" aria-label="Shared Canvas ホーム">
+          <span className="brand-mark" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+          <span>Shared Canvas</span>
+        </a>
+      </header>
 
-      <div className="canvas-controls">
-        <input
-          type="color"
-          value={color}
-          onChange={(e) => setColor(e.target.value)}
-          aria-label="Drawing color"
-        />
+      <section className="workspace" aria-label="共有キャンバス">
+        <div className="toolbar">
+          <div className="color-tools">
+            <label className="color-picker">
+              <span>カラー</span>
+              <span className="color-input-wrap" style={{ "--selected-color": color } as React.CSSProperties}>
+                <input
+                  type="color"
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                  aria-label="描画色を選択"
+                />
+              </span>
+              <output>{color.toUpperCase()}</output>
+            </label>
 
-        <button type="button" onClick={handleReset} disabled={!connected}>
-          Reset
-        </button>
+            <div className="preset-colors" aria-label="カラープリセット">
+              {COLOR_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={color === preset ? "is-selected" : ""}
+                  style={{ "--preset-color": preset } as React.CSSProperties}
+                  onClick={() => setColor(preset)}
+                  aria-label={`${preset}を選択`}
+                  aria-pressed={color === preset}
+                />
+              ))}
+            </div>
+          </div>
 
-        <span className="cleared-at" aria-live="polite">
-          Last reset:{" "}
-          {clearedAt === undefined ? (
-            clearedAtLabel
-          ) : (
-            <time dateTime={new Date(clearedAt).toISOString()}>
-              {clearedAtLabel}
-            </time>
-          )}
-        </span>
-      </div>
+          <div className="workspace-actions">
+            <div
+              className={`connection-status ${connected ? "is-online" : ""}`}
+              role="status"
+              aria-live="polite"
+            >
+              <span className="status-dot" aria-hidden="true" />
+              {connected ? "ライブ接続中" : "接続しています"}
+            </div>
 
-      <div style={{ marginTop: 12 }}>
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_PX}
-          height={CANVAS_PX}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-          style={{
-            border: "1px solid black",
-            backgroundColor: "#ffffff",
-            imageRendering: "pixelated",
-            cursor: "crosshair",
-            touchAction: "none",
-          }}
-        />
-      </div>
-    </div>
+            <span className="cleared-at" aria-live="polite">
+              <span>最終リセット</span>
+              {clearedAt === undefined ? (
+                clearedAtLabel
+              ) : (
+                <time dateTime={new Date(clearedAt).toISOString()}>
+                  {clearedAtLabel}
+                </time>
+              )}
+            </span>
+
+            <button
+              className="reset-button"
+              type="button"
+              onClick={handleReset}
+              disabled={!connected}
+            >
+              リセット
+            </button>
+          </div>
+        </div>
+
+        <div className="canvas-stage">
+          <div className="canvas-frame">
+            <canvas
+              ref={canvasRef}
+              width={CANVAS_PX}
+              height={CANVAS_PX}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              onPointerLeave={handlePointerUp}
+              aria-label="128×128ピクセルの共有描画キャンバス"
+            />
+          </div>
+        </div>
+
+        <footer className="canvas-meta">
+          <span className="drawing-hint">
+            <span className="pointer-icon" aria-hidden="true" />
+            クリックまたはドラッグして描画
+          </span>
+          <span className="canvas-size">128 × 128 PX</span>
+        </footer>
+      </section>
+    </main>
   );
 }
